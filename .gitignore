@@ -1,0 +1,10 @@
+node_modules/
+data/paper-trades.db
+data/paper-trades.db-shm
+data/paper-trades.db-wal
+.env
+*.log
+.bot_token
+.credentials.b64
+.env.bak
+.credentials*
