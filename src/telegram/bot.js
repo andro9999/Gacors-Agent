@@ -282,6 +282,8 @@ export async function sendNotification(type, data) {
         `Direction:  ${data.direction}`,
         `Price:      $${data.price}`,
         `Quantity:   ${data.quantity}`,
+        `Notional:   $${data.notional || 'N/A'}`,
+        `Margin:     $${data.margin || 'N/A'}`,
         `SL:         ${data.sl ? '$' + data.sl : 'N/A'}`,
         `TP1/TP2/TP3: ${data.tp1 || '-'} / ${data.tp2 || '-'} / ${data.tp3 || '-'}`,
       ].join('\n');

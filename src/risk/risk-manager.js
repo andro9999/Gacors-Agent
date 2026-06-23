@@ -117,8 +117,8 @@ function checkCluster(candidate, positions, config) {
  * @returns {{ allowed: boolean, reason: string|null }}
  */
 function checkDirection(side, positions, config) {
-  const maxSame = config?.MAX_SAME_DIRECTION ?? 2;
-  const count = positions.filter(p => p.side === side).length;
+  const maxSame = config?.POSITIONS?.MAX_SAME_DIRECTION ?? config?.MAX_SAME_DIRECTION ?? 7;
+  const count = positions.filter(p => p.direction === side || p.side === side).length;
 
   if (count >= maxSame) {
     return {

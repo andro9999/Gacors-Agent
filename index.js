@@ -7,7 +7,7 @@ import { runFilterChain } from './src/filters/filter-chain.js';
 import { calculateScore } from './src/scoring/scoring-engine.js';
 import { checkRisk, calculatePositionSize } from './src/risk/risk-manager.js';
 import { llmGate } from './src/risk/llm-gate.js';
-import { openPosition, getPositions, getBalance } from './src/execution/paper-trader.js';
+import { openPosition, getPositions, getBalance, getTradeLog } from './src/execution/paper-trader.js';
 import { calculateSLTP, startMonitoring, setTelegramBot } from './src/execution/position-manager.js';
 import { startBot, sendNotification, isPausedState } from './src/telegram/bot.js';
 
@@ -199,16 +199,26 @@ async function runScan() {
       console.log(`    ${c.symbol.padEnd(12)} ${c.side.padEnd(6)} Score: ${c.score.toFixed(1)} | Trend:${c.breakdown.trend} Mom:${c.breakdown.momentum} Vol:${c.breakdown.volume} Str:${c.breakdown.structure} Bon:${c.breakdown.bonus}`);
     }
 
-    // ── Phase 3: Execute top N trades ──
+    // ── Phase 3: Execute top N trades (max 3 per scan to avoid correlation) ──
     let tradesExecuted = 0;
-    const maxTrades = Math.min(slotsAvailable, candidates.length);
+    const maxTradesPerScan = 3;
+    const maxTrades = Math.min(slotsAvailable, candidates.length, maxTradesPerScan);
 
     for (let i = 0; i < maxTrades; i++) {
       const c = candidates[i];
 
       try {
-        // Risk check
-        const risk = checkRisk({ symbol: c.symbol, side: c.side.toUpperCase(), score: c.score }, getPositions(), CFG);
+        // Risk check — pass closedTrades and balance for circuit breaker + daily loss
+        const allLogs = getTradeLog(-1);
+        const closedTrades = allLogs
+          .filter(l => l.type === 'CLOSE' || l.type?.startsWith('CLOSE_'))
+          .map(l => ({ symbol: l.asset, pnl: l.pnl || 0, closedAt: new Date(l.timestamp).getTime() }));
+        const currentBalance = getBalance();
+        const risk = checkRisk({ symbol: c.symbol, side: c.side.toUpperCase(), score: c.score }, getPositions(), {
+          ...CFG,
+          closedTrades,
+          balance: currentBalance,
+        });
         if (!risk.allowed) {
           console.log(`    ${c.symbol} BLOCKED by risk: ${risk.blockers.join(', ')}`);
           continue;
@@ -232,7 +242,9 @@ async function runScan() {
         // Calculate position size (dynamic: balance / max_positions)
         const balance = getBalance();
         const posSize = calculatePositionSize(c.score, balance, CFG);
-        const quantity = posSize.sizeUsd / entryPrice;
+        const leverage = CFG.POSITIONS.LEVERAGE || 10;
+        const notional = posSize.sizeUsd * leverage; // margin x leverage
+        const quantity = notional / entryPrice;
 
         if (quantity <= 0 || posSize.sizeUsd < 1) continue;
 
@@ -250,7 +262,7 @@ async function runScan() {
         });
 
         tradesExecuted++;
-        console.log(`  OPENED: ${c.symbol} ${c.side.toUpperCase()} @ $${entryPrice} | $${posSize.sizeUsd.toFixed(2)} | Score: ${c.score.toFixed(1)} | SL: $${sltp.sl}`);
+        console.log(`  OPENED: ${c.symbol} ${c.side.toUpperCase()} @ $${entryPrice} | Margin: $${posSize.sizeUsd.toFixed(2)} | Notional: $${notional.toFixed(2)} | Score: ${c.score.toFixed(1)} | SL: $${sltp.sl}`);
 
         // Telegram notification
         await sendNotification('ENTRY', {
@@ -258,6 +270,8 @@ async function runScan() {
           direction: c.side.toUpperCase(),
           price: entryPrice,
           quantity: quantity.toFixed(6),
+          notional: notional.toFixed(2),
+          margin: posSize.sizeUsd.toFixed(2),
           sl: sltp.sl,
           tp1: sltp.tp1,
           tp2: sltp.tp2,

@@ -53,7 +53,7 @@ const criticalFilters = [
     name: 'volume_ratio',
     check: (_candidate, indicators, _config) => {
       const ratio = indicators.volumeRatio ?? 0;
-      const minRatio = 0.3; // At least 30% of average volume
+      const minRatio = 0.5; // At least 50% of average volume
       if (ratio < minRatio) {
         return { pass: false, reason: `volume ${ratio.toFixed(2)}x < ${minRatio}x, too low` };
       }

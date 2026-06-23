@@ -27,8 +27,8 @@ const CONFIG = {
   TRAILING_ATR_MULT:       1.5,     // or ATR * 1.5
   TRAILING_LOCK_PCT:       2.0,     // lock profit at 2%
   HARD_STOP_PCT:           6.0,     // hard stop at -6% unrealized
-  PYRAMID_TRIGGER_PCT:    -1.5,     // pyramid at -1.5% if score >= 12
-  PYRAMID_SCORE_MIN:       12,
+  PYRAMID_TRIGGER_PCT:   -999,     // DISABLED — pyramid too risky without actual score tracking
+  PYRAMID_SCORE_MIN:       999,    // DISABLED
   PYRAMID_SIZE_PCT:        50,      // add 50% of original size
   TP1_PCT:                 25,      // TP1 takes 25% of position
   TP2_PCT:                 25,      // TP2 takes 25%
@@ -252,15 +252,29 @@ function closePartial(id, qty, price, action, reason) {
   if (!pos) return;
 
   const isLong = pos.direction === 'LONG';
+
+  // Apply exit slippage
+  const SLIPPAGE_BPS = 5;
+  const FEE_RATE = 0.0006;
+  const exitSlippage = price * (SLIPPAGE_BPS / 10000);
+  const exitPrice = isLong ? price - exitSlippage : price + exitSlippage;
+
   const pnl = isLong
-    ? (price - pos.entry_price) * qty
-    : (pos.entry_price - price) * qty;
+    ? (exitPrice - pos.entry_price) * qty
+    : (pos.entry_price - exitPrice) * qty;
+
+  const exitFee = exitPrice * qty * FEE_RATE;
+  const marginReturn = (pos.entry_price * qty) / 10; // entry-based margin for closed portion
 
   const newQty = +(pos.quantity - qty).toFixed(8);
   if (newQty <= 0.0000001) {
     closePosition(id, price);
   } else {
     _updateQuantity(id, newQty, pos.pyramid);
+    // Return margin + pnl - fee for partial close
+    const db = _getDB();
+    const balance = db.prepare('SELECT value FROM balance WHERE id = 1').get().value;
+    db.prepare('UPDATE balance SET value = ? WHERE id = 1').run(balance + marginReturn + pnl - exitFee);
   }
 
   // Log partial close
@@ -268,7 +282,7 @@ function closePartial(id, qty, price, action, reason) {
   db.prepare(`
     INSERT INTO trade_log (timestamp, asset, direction, price, quantity, balance_change, pnl, type)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(new Date().toISOString(), pos.asset, pos.direction, price, qty, price * qty, pnl, `CLOSE_${action}`);
+  `).run(new Date().toISOString(), pos.asset, pos.direction, exitPrice, qty, marginReturn + pnl - exitFee, pnl, `CLOSE_${action}`);
 }
 
 // ── Notification Helper ─────────────────────────────────────────────────────

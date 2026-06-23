@@ -36,9 +36,9 @@ export const CONFIG = {
   LLM: {
     ENDPOINT: 'http://localhost:20128/v1',
     MODEL: 'deepseek-v3.2',
-    CONFIDENCE_THRESHOLD: 0.5,
-    CONFIDENCE_LONG: 0.55,
-    BYPASS_SCORE: 55,
+    CONFIDENCE_THRESHOLD: 0.3,
+    CONFIDENCE_LONG: 0.35,
+    BYPASS_SCORE: 80,
     MAX_TOKENS: 512,
     TEMPERATURE: 0.1,
     TIMEOUT_MS: 15000
@@ -73,9 +73,9 @@ export const CONFIG = {
 
   // ─── SCORING ─────────────────────────────────────────────────────────
   SCORING: {
-    MIN_SCORE_NORMAL: 45,
-    MIN_SCORE_LONG: 50,
-    MIN_SCORE_SHORT_BEAR: 40,
+    MIN_SCORE_NORMAL: 50,
+    MIN_SCORE_LONG: 55,
+    MIN_SCORE_SHORT_BEAR: 45,
     BONUS_GATE: 5,
     WEIGHTS: {
       RSI: 1,
@@ -149,13 +149,13 @@ export const CONFIG = {
   // ─── POSITION MANAGEMENT ─────────────────────────────────────────────
   POSITIONS: {
     MAX_OPEN: 10,
-    MAX_SAME_DIRECTION: 2,
+    MAX_SAME_DIRECTION: 7,
     MAX_CORRELATED: 3,
     LEVERAGE: 10,
-    POSITION_SIZE_PCT: 10.0,        // % of balance per trade ($100 of $1000)
+    POSITION_SIZE_PCT: 10.0,        // % of balance per trade ($1000 of $10000)
     MAX_POSITION_SIZE_PCT: 10.0,    // Max single position size
     SCALP_SIZE_PCT: 1.0,            // Smaller size for scalps
-    COOLDOWN_MS: 300000             // 5 min between trades same pair
+    COOLDOWN_MS: 600000             // 10 min between trades same pair
   },
 
   // ─── CLUSTER LIMITS ──────────────────────────────────────────────────
@@ -184,7 +184,7 @@ export const CONFIG = {
 
   // ─── PAPER TRADING ───────────────────────────────────────────────────
   PAPER: {
-    INITIAL_BALANCE: 1000,
+    INITIAL_BALANCE: 10000,
     ENABLED: true,
     SLIPPAGE_BPS: 5,                // 0.05% simulated slippage
     FEE_RATE: 0.0006,               // 0.06% taker fee

@@ -67,8 +67,16 @@ function buildPrompt(candidate, indicators) {
 
   const atrPct = price > 0 ? ((ATR / price) * 100).toFixed(2) : 'N/A';
 
-  return `Analyze this crypto trade setup. Reply ONLY in this exact JSON format:
+  return `You are a 10x leverage futures trading bot. Reply ONLY in JSON:
 {"decision":"yes|no","confidence":0.0-1.0,"rationale":"brief reason"}
+
+RULES:
+- Score ≥45 = already filtered by 16 technical layers
+- We trade 10x leverage with tight SL (ATR-based)
+- We want QUICK MOMENTUM entries, not perfect setups
+- A score of 50-65 is NORMAL and ACCEPTABLE
+- Only say "no" if there's a CLEAR reason (RSI >80, trend reversal, etc.)
+- Do NOT reject for "weak momentum" - momentum is always relative
 
 SETUP: ${symbol} ${side.toUpperCase()}
 Score: ${score}/100 | Price Δ: ${priceChangePct.toFixed(2)}%
@@ -86,7 +94,7 @@ VOLUME/POSITIONING:
 - BB squeeze: ${bbSqueeze ? 'YES' : 'no'} | Choppiness: ${choppiness.toFixed(1)}
 - ATR%: ${atrPct}%
 
-Is this a good ${side} entry? Consider risk/reward, momentum alignment, and position.`;
+Is this a good ${side} entry for a 10x leverage scalp? Only say no if clearly bad.`;
 }
 
 // ─── Response Parser ───────────────────────────────────────────────────────────
@@ -195,11 +203,11 @@ export async function llmGate(candidate, indicators, config) {
   try {
     result = await callLLM(prompt, config);
   } catch (err) {
-    // On failure, don't block — return neutral
+    // On failure, REJECT — fail-closed is safer for live trading
     const fallback = {
-      approved: true,
-      confidence: 0.3,
-      rationale: `LLM call failed (${err.message}), defaulting to pass`,
+      approved: false,
+      confidence: 0,
+      rationale: `LLM call failed (${err.message}), rejecting (fail-closed)`,
       bypassed: false,
       cached: false,
     };

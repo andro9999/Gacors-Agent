@@ -10,8 +10,11 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.join(__dirname, '../../data/paper-trades.db');
-const STARTING_BALANCE = 1000;
+const STARTING_BALANCE = 10000;
 const MAX_POSITIONS = 10;
+const LEVERAGE = 10;
+const FEE_RATE = 0.0006;     // 0.06% taker fee (each side)
+const SLIPPAGE_BPS = 5;      // 0.05% slippage simulation
 
 // ── Database Setup ──────────────────────────────────────────────────────────
 
@@ -107,21 +110,26 @@ export function openPosition(data) {
     throw new Error(`Max ${MAX_POSITIONS} open positions reached`);
   }
 
-  const cost = price * quantity;
+  const slippage = price * (SLIPPAGE_BPS / 10000);
+  const entryPrice = direction === 'LONG' ? price + slippage : price - slippage;
+  const notional = entryPrice * quantity;
+  const margin = notional / LEVERAGE;
+  const entryFee = notional * FEE_RATE;
+  const totalCost = margin + entryFee;
   const balance = stmts.getBalance.get().value;
-  if (cost > balance) {
-    throw new Error(`Insufficient balance: need $${cost.toFixed(2)}, have $${balance.toFixed(2)}`);
+  if (totalCost > balance) {
+    throw new Error(`Insufficient balance: need $${totalCost.toFixed(2)} (margin $${margin.toFixed(2)} + fee $${entryFee.toFixed(2)}), have $${balance.toFixed(2)}`);
   }
 
   const id = randomUUID();
   const now = new Date().toISOString();
 
   const txn = db.transaction(() => {
-    stmts.setBalance.run(balance - cost);
+    stmts.setBalance.run(balance - totalCost);
     stmts.insertPosition.run({
       id, asset, direction,
-      entry_price: price,
-      current_price: price,
+      entry_price: entryPrice,
+      current_price: entryPrice,
       quantity,
       sl, tp1, tp2, tp3,
       opened_at: now,
@@ -133,9 +141,9 @@ export function openPosition(data) {
       timestamp: now,
       asset,
       direction,
-      price,
+      price: entryPrice,
       quantity,
-      balance_change: -cost,
+      balance_change: -totalCost,
       pnl: null,
       type: 'OPEN',
     });
@@ -157,16 +165,24 @@ export function closePosition(id, price) {
 
   const { asset, direction, entry_price, quantity } = pos;
 
+  // Apply exit slippage
+  const exitSlippage = price * (SLIPPAGE_BPS / 10000);
+  const exitPrice = direction === 'LONG' ? price - exitSlippage : price + exitSlippage;
+
   let pnl;
   if (direction === 'LONG') {
-    pnl = (price - entry_price) * quantity;
+    pnl = (exitPrice - entry_price) * quantity;
   } else {
-    pnl = (entry_price - price) * quantity;
+    pnl = (entry_price - exitPrice) * quantity;
   }
 
-  const proceeds = price * quantity;
+  // Margin based on ENTRY price (not exit) — fixes balance leak bug
+  const entryNotional = entry_price * quantity;
+  const margin = entryNotional / LEVERAGE;
+  const exitNotional = exitPrice * quantity;
+  const exitFee = exitNotional * FEE_RATE;
   const balance = stmts.getBalance.get().value;
-  const newBalance = balance + proceeds;
+  const newBalance = balance + margin + pnl - exitFee;
 
   const now = new Date().toISOString();
 
@@ -177,16 +193,16 @@ export function closePosition(id, price) {
       timestamp: now,
       asset,
       direction,
-      price,
+      price: exitPrice,
       quantity,
-      balance_change: proceeds,
+      balance_change: margin + pnl - exitFee,
       pnl,
       type: 'CLOSE',
     });
   });
   txn();
 
-  return { position: pos, pnl, balanceChange: proceeds };
+  return { position: pos, pnl, balanceChange: margin + pnl - exitFee };
 }
 
 /**
