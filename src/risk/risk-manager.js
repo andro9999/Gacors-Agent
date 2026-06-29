@@ -202,13 +202,10 @@ export function checkRisk(candidate, positions, config) {
   const closedTrades = config?.closedTrades ?? [];
   const balance = config?.balance ?? 1000;
 
-  // 1. Circuit breaker — DISABLED until 10 positions are open (fresh start bypass)
-  //    Re-enables automatically once all slots are filled with new-system positions.
+  // 1. Circuit breaker — always active
   const circuit = checkCircuitBreaker(closedTrades, config);
-  if (circuit.tripped && positions.length >= 10) {
+  if (circuit.tripped) {
     blockers.push(`CIRCUIT BREAKER: ${circuit.reason}`);
-  } else if (circuit.tripped) {
-    console.log(`  [CircuitBreaker] BYPASSED (${positions.length}/10 positions) — ${circuit.reason}`);
   }
 
   // 2. Daily loss limit

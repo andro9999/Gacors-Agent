@@ -2,49 +2,58 @@
  * Scoring Engine — 0-100 scale signal scoring
  *
  * Components:
- *  1. Trend score (0-25): EMA alignment, ADX strength, 4H trend
+ *  1. Trend score (0-25): EMA spread strength, ADX strength, DI gap, 4H trend
  *  2. Momentum score (0-25): RSI zone, MACD direction, StochRSI
  *  3. Volume score (0-20): volume ratio, taker bias
  *  4. Structure score (0-15): Bollinger position, Fisher, candle
- *  5. Bonus (0-15): multi-TF confluence, breakout, squeeze
+ *  5. Bonus (0-15): multi-TF confluence, breakout, squeeze, volume momentum
  *  6. Penalty: from soft filters
  *
  * Min score to trade: 55/100
  */
 
 // ─── Trend Score (0-25) ─────────────────────────────────────────────────────
+//
+// Measures trend STRENGTH (continuous), not just presence:
+//   - EMA spread (|EMA9-EMA21| as % of price): 0-8 points
+//   - ADX strength (adx/50 * 10, capped):      0-10 points
+//   - DI gap (|DI+ - DI-|, direction-aware):   0-4 points
+//   - 4H trend bonus:                          0-3 points
 
 function computeTrendScore(indicators, side) {
   let score = 0;
 
-  // EMA alignment (0-10)
   const ema9 = indicators.EMA9 ?? 0;
   const ema21 = indicators.EMA21 ?? 0;
-  const ema50 = indicators.EMA50 ?? 0;
-  if (side === 'long') {
-    if (ema9 > ema21) score += 5;
-    if (ema21 > ema50) score += 3;
-    if (ema9 > ema50) score += 2;
-  } else {
-    if (ema9 < ema21) score += 5;
-    if (ema21 < ema50) score += 3;
-    if (ema9 < ema50) score += 2;
+  const price = indicators.price ?? ema21 ?? 0;
+
+  // EMA spread strength (0-8) — only when EMAs are aligned with the side.
+  // Spread of ~2% of price maps to full 8 points.
+  const emaAligned =
+    (side === 'long' && ema9 > ema21) ||
+    (side === 'short' && ema9 < ema21);
+  if (emaAligned && price > 0) {
+    const spreadPct = (Math.abs(ema9 - ema21) / price) * 100;
+    score += Math.min(8, spreadPct * 4); // 2% spread => 8 pts
   }
 
-  // ADX strength (0-8)
+  // ADX strength (0-10) — continuous: adx/50 * 10, capped at 10.
   const adx = indicators.ADX ?? 0;
-  if (adx >= 30) score += 8;
-  else if (adx >= 25) score += 6;
-  else if (adx >= 20) score += 4;
-  else if (adx >= 18) score += 2;
+  score += Math.min(10, (adx / 50) * 10);
 
-  // DI alignment (0-4)
+  // DI gap (0-4) — continuous on |DI+ - DI-|, only when DI favors the side.
+  // Gap of ~20 maps to full 4 points.
   const diPlus = indicators.DI_plus ?? 0;
   const diMinus = indicators.DI_minus ?? 0;
-  if (side === 'long' && diPlus > diMinus) score += 4;
-  if (side === 'short' && diMinus > diPlus) score += 4;
+  const diAligned =
+    (side === 'long' && diPlus > diMinus) ||
+    (side === 'short' && diMinus > diPlus);
+  if (diAligned) {
+    const diGap = Math.abs(diPlus - diMinus);
+    score += Math.min(4, diGap * 0.2); // gap 20 => 4 pts
+  }
 
-  // 4H trend bonus (0-3)
+  // 4H trend bonus (0-3) — keep as-is.
   const trend4h = indicators.trend_4h ?? 'neutral';
   if ((side === 'long' && trend4h === 'bullish') || (side === 'short' && trend4h === 'bearish')) {
     score += 3;
@@ -95,6 +104,7 @@ function computeMomentumScore(indicators, side) {
 }
 
 // ─── Volume Score (0-20) ────────────────────────────────────────────────────
+// Kept as-is — the filter change to 1.5x min volume fixes the distribution.
 
 function computeVolumeScore(indicators, _side) {
   let score = 0;
@@ -114,6 +124,36 @@ function computeVolumeScore(indicators, _side) {
   else if (taker > 0.5) score += 2;
 
   return Math.min(20, score);
+}
+
+// ─── Volume Momentum Helper (0-4) ────────────────────────────────────────────
+//
+// True volume momentum: is current volume rising vs the previous 3 bars?
+// Uses the per-bar volumeRatio series (volume normalized by its 20-bar average,
+// so comparing recent ratios is a valid proxy for comparing raw volume).
+// Falls back to the scalar volumeRatio vs a 1.0 baseline when no series exists.
+// Returns 0-4 continuous points scaled by how much current exceeds the average.
+
+function computeVolumeMomentum(indicators) {
+  const series = indicators.arrays?.volumeRatio;
+
+  if (Array.isArray(series) && series.length >= 4) {
+    const current = series[series.length - 1];
+    const prev3 = series.slice(-4, -1);
+    const avg = prev3.reduce((a, b) => a + b, 0) / prev3.length;
+    if (avg > 0 && current > avg) {
+      const ratio = current / avg; // >1 means accelerating volume
+      return Math.min(4, (ratio - 1) * 8); // +50% over avg => full 4 pts
+    }
+    return 0;
+  }
+
+  // Fallback: no per-bar series available, use scalar volumeRatio.
+  const vr = indicators.volumeRatio ?? 0;
+  if (vr > 1.0) {
+    return Math.min(4, (vr - 1.0) * 4); // 2.0x => full 4 pts
+  }
+  return 0;
 }
 
 // ─── Structure Score (0-15) ─────────────────────────────────────────────────
@@ -140,6 +180,9 @@ function computeStructureScore(indicators, side) {
 }
 
 // ─── Bonus Score (0-15) ─────────────────────────────────────────────────────
+//
+// Components: multi-TF confluence (0-5), Bollinger squeeze (0-5),
+// favorable funding (0-5), and volume momentum (0-4). Capped at 15.
 
 function computeBonusScore(indicators, side) {
   let score = 0;
@@ -165,6 +208,9 @@ function computeBonusScore(indicators, side) {
   if ((side === 'long' && funding < 0) || (side === 'short' && funding > 0)) {
     score += 5; // getting paid to hold
   }
+
+  // Volume momentum (0-4) — current volume rising vs previous 3 bars
+  score += computeVolumeMomentum(indicators);
 
   return Math.min(15, score);
 }

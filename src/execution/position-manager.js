@@ -26,7 +26,7 @@ const CONFIG = {
   TRAILING_PCT:            3.0,     // trailing SL distance %
   TRAILING_ATR_MULT:       2.0,     // trail at 2x ATR distance (runner model)
   TRAILING_LOCK_PCT:       2.0,     // lock profit at 2%
-  HARD_STOP_PCT:           4.0,     // hard stop at -4% unrealized (Opus recommendation)
+  HARD_STOP_PCT:           6.0,     // hard stop at -4% unrealized (Opus recommendation)
   PYRAMID_TRIGGER_PCT:   -999,     // DISABLED — pyramid too risky without actual score tracking
   PYRAMID_SCORE_MIN:       999,    // DISABLED
   PYRAMID_SIZE_PCT:        50,      // add 50% of original size

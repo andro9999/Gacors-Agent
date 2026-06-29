@@ -150,6 +150,10 @@ async function callLLM(prompt, config) {
   const model = config?.LLM?.MODEL ?? 'deepseek-v3.2';
   const timeout = config?.LLM?.TIMEOUT_MS ?? 15000;
 
+  const apiKey = config?.LLM?.API_KEY ?? '';
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
   const response = await axios.post(endpoint, {
     model,
     messages: [
@@ -160,7 +164,7 @@ async function callLLM(prompt, config) {
     max_tokens: 300,
   }, {
     timeout,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
   });
 
   const content = response?.data?.choices?.[0]?.message?.content ?? '';
