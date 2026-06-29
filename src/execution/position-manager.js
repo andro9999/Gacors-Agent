@@ -24,15 +24,13 @@ const CONFIG = {
   MONITOR_INTERVAL_FAST:   5_000,   // 5s when profit > 3%
   BREAKEVEN_PCT:           1.5,     // move SL to entry at +1.5%
   TRAILING_PCT:            3.0,     // trailing SL distance %
-  TRAILING_ATR_MULT:       1.5,     // or ATR * 1.5
+  TRAILING_ATR_MULT:       2.0,     // trail at 2x ATR distance (runner model)
   TRAILING_LOCK_PCT:       2.0,     // lock profit at 2%
-  HARD_STOP_PCT:           6.0,     // hard stop at -6% unrealized
+  HARD_STOP_PCT:           4.0,     // hard stop at -4% unrealized (Opus recommendation)
   PYRAMID_TRIGGER_PCT:   -999,     // DISABLED — pyramid too risky without actual score tracking
   PYRAMID_SCORE_MIN:       999,    // DISABLED
   PYRAMID_SIZE_PCT:        50,      // add 50% of original size
-  TP1_PCT:                 25,      // TP1 takes 25% of position
-  TP2_PCT:                 25,      // TP2 takes 25%
-  TP3_PCT:                 50,      // TP3 trailing takes remaining 50%
+  TP1_PCT:                 50,      // TP1 takes 50% of position, rest runs/trails
 };
 
 // ── State ───────────────────────────────────────────────────────────────────
@@ -57,24 +55,18 @@ export function setTelegramBot(bot) {
 export function calculateSLTP(entry, side, atr = null) {
   if (!atr) atr = entry * 0.02; // default ATR = 2% of price
 
-  const slDist  = Math.max(atr * 2, entry * 0.02);   // SL: 2x ATR or 2%
-  const tp1Dist = Math.max(atr * 1.5, entry * 0.015); // TP1: 1.5x ATR or 1.5%
-  const tp2Dist = Math.max(atr * 2.5, entry * 0.025); // TP2: 2.5x ATR or 2.5%
-  const tp3Dist = Math.max(atr * 4,   entry * 0.04);  // TP3: 4x ATR or 4%
+  const slDist  = Math.max(atr * 2,   entry * 0.02);  // SL: 2x ATR or 2%
+  const tp1Dist = Math.max(atr * 1.0, entry * 0.01);  // TP1: 1.0x ATR or 1%
 
   if (side === 'LONG') {
     return {
       sl:  +(entry - slDist).toFixed(8),
       tp1: +(entry + tp1Dist).toFixed(8),
-      tp2: +(entry + tp2Dist).toFixed(8),
-      tp3: +(entry + tp3Dist).toFixed(8),
     };
   } else {
     return {
       sl:  +(entry + slDist).toFixed(8),
       tp1: +(entry - tp1Dist).toFixed(8),
-      tp2: +(entry - tp2Dist).toFixed(8),
-      tp3: +(entry - tp3Dist).toFixed(8),
     };
   }
 }
@@ -86,7 +78,7 @@ export function calculateSLTP(entry, side, atr = null) {
  * @returns {{ action: string, reason: string } | null}
  */
 export function checkExit(position, price) {
-  const { direction, entry_price, sl, tp1, tp2, tp3, stage } = position;
+  const { direction, entry_price, sl, tp1, stage } = position;
   const isLong = direction === 'LONG';
 
   // Calculate unrealized P&L %
@@ -106,20 +98,10 @@ export function checkExit(position, price) {
     }
   }
 
-  // ── TP stages ──
+  // ── TP1: take 50% off, move SL to breakeven, let the rest run/trail ──
   if (stage < 1 && tp1 !== null) {
     if ((isLong && price >= tp1) || (!isLong && price <= tp1)) {
       return { action: 'TP1', reason: `Price ${price} hit TP1 ${tp1}` };
-    }
-  }
-  if (stage < 2 && tp2 !== null) {
-    if ((isLong && price >= tp2) || (!isLong && price <= tp2)) {
-      return { action: 'TP2', reason: `Price ${price} hit TP2 ${tp2}` };
-    }
-  }
-  if (stage < 3 && tp3 !== null) {
-    if ((isLong && price >= tp3) || (!isLong && price <= tp3)) {
-      return { action: 'TP3', reason: `Price ${price} hit TP3 ${tp3}` };
     }
   }
 
@@ -191,8 +173,6 @@ function processPosition(position, price) {
             quantity: addQty,
             sl: position.sl,
             tp1: position.tp1,
-            tp2: position.tp2,
-            tp3: position.tp3,
             atr: position.atr,
           });
           _updateQuantity(id, quantity + addQty, 1);
@@ -220,26 +200,16 @@ function handleExit(id, action, reason, price) {
   const pos = _getPosition(id);
   if (!pos) return;
 
-  let qtyToClose = pos.quantity;
-
   if (action === 'TP1') {
-    qtyToClose = pos.quantity * (CONFIG.TP1_PCT / 100);
-    const newSL = pos.entry_price; // move to breakeven
+    const qtyToClose = pos.quantity * (CONFIG.TP1_PCT / 100);
+    const newSL = pos.entry_price; // move remaining runner to breakeven
     _updateStage(id, 1, newSL);
     closePartial(id, qtyToClose, price, action, reason);
     notify('TP1', { ...pos, current_price: price, closedQty: qtyToClose, remainingQty: pos.quantity - qtyToClose });
     return;
   }
 
-  if (action === 'TP2') {
-    qtyToClose = pos.quantity * (CONFIG.TP2_PCT / 100);
-    _updateStage(id, 2, pos.sl);
-    closePartial(id, qtyToClose, price, action, reason);
-    notify('TP2', { ...pos, current_price: price, closedQty: qtyToClose, remainingQty: pos.quantity - qtyToClose });
-    return;
-  }
-
-  // TP3, SL, HARD_STOP — close everything
+  // SL, HARD_STOP — close everything
   const result = closePosition(id, price);
   notify(action, { ...pos, current_price: price, pnl: result.pnl, reason });
 }

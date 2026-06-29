@@ -14,6 +14,20 @@ import { startBot, sendNotification, isPausedState } from './src/telegram/bot.js
 const CFG = CONFIG;
 let scanCount = 0;
 
+// ── Cooldown Tracker ────────────────────────────────────────────────────────
+const lastTradeTime = new Map(); // symbol -> timestamp
+
+function isOnCooldown(symbol) {
+  const last = lastTradeTime.get(symbol);
+  if (!last) return false;
+  return (Date.now() - last) < CFG.POSITIONS.COOLDOWN_MS;
+}
+
+function recordTrade(symbol) {
+  lastTradeTime.set(symbol, Date.now());
+}
+
+
 // ── Indicator Adapter ────────────────────────────────────────────────────────
 
 function adaptIndicators(result, extra = {}) {
@@ -68,6 +82,20 @@ function getCluster(symbol) {
   return 'unknown';
 }
 
+// ── BTC Regime Helper ─────────────────────────────────────────────────────────
+
+/**
+ * Decide whether a side is allowed under the current BTC regime.
+ *   BEARISH → only shorts (skip longs)
+ *   BULLISH → only longs (skip shorts)
+ *   NEUTRAL → both allowed
+ */
+function regimeAllowsSide(btcRegime, side) {
+  if (btcRegime === 'BEARISH') return side === 'short';
+  if (btcRegime === 'BULLISH') return side === 'long';
+  return true;
+}
+
 // ── Scan Cycle ──────────────────────────────────────────────────────────────
 
 async function runScan() {
@@ -83,7 +111,11 @@ async function runScan() {
 
     const btcResult = await getBTCRegime();
     const btcRegime = btcResult?.trend?.overall || 'NEUTRAL';
-    console.log(`  BTC Regime: ${btcRegime}`);
+
+    const regimeMode = btcRegime === 'BEARISH' ? 'SHORTS ONLY'
+                     : btcRegime === 'BULLISH' ? 'LONGS ONLY'
+                     : 'BOTH';
+    console.log(`  BTC Regime: ${btcRegime} → ${regimeMode}`);
 
     const positions = getPositions();
     const openCount = positions.length;
@@ -105,6 +137,7 @@ async function runScan() {
     let filterFailed = 0;
     let scorePassed = 0;
     let scoreFailed = 0;
+    let regimeVetoed = 0;
 
     for (const symbol of pairs.slice(0, 100)) {
       try {
@@ -133,7 +166,15 @@ async function runScan() {
         // Determine side from trend
         const side = indicators.trend_overall === 'BULLISH' ? 'long' :
                      indicators.trend_overall === 'BEARISH' ? 'short' :
+                     btcRegime === 'BULLISH' ? 'long' :
+                     btcRegime === 'BEARISH' ? 'short' :
                      indicators.EMA9 > indicators.EMA21 ? 'long' : 'short';
+
+        // BTC Regime Veto: hard gate
+        if (!regimeAllowsSide(btcRegime, side)) {
+          regimeVetoed++;
+          continue;
+        }
 
         // Build candidate
         const candidate = {
@@ -151,6 +192,10 @@ async function runScan() {
 
         if (!filter.pass) {
           filterFailed++;
+          if (filterFailed <= 5) { // Log first 5 rejections for debugging
+            const reasons = filter.failures?.map(f => f.reason).join('; ') || 'unknown';
+            console.log(`    REJECT ${symbol}: ${reasons.slice(0, 100)}`);
+          }
           continue;
         }
         filterPassed++;
@@ -182,8 +227,8 @@ async function runScan() {
       }
     }
 
-    console.log(`  Scanned: ${scanned} | Filter: ${filterPassed}/${filterFailed} | Score: ${scorePassed}/${scoreFailed}`);
-    console.log(`  Candidates: ${candidates.length}`);
+    console.log(`  Scanned: ${scanned} | RegimeVeto: ${regimeVetoed} | Filter: ${filterPassed}/${filterFailed} | Score: ${scorePassed}/${scoreFailed}`);
+    console.log(`  Candidates: ${candidates.length} (regime: ${btcRegime} → ${regimeMode})`);
 
     if (candidates.length === 0) {
       console.log('  No candidates found');
@@ -208,6 +253,11 @@ async function runScan() {
       const c = candidates[i];
 
       try {
+        // Cooldown check — skip if recently traded this symbol
+        if (isOnCooldown(c.symbol)) {
+          continue;
+        }
+
         // Risk check — pass closedTrades and balance for circuit breaker + daily loss
         const allLogs = getTradeLog(-1);
         const closedTrades = allLogs
@@ -225,11 +275,12 @@ async function runScan() {
         }
 
         // LLM gate (bypass if score >= 80)
+        // LLM gate: ADVISORY ONLY — log but don't block (Opus recommendation)
         const llm = await llmGate({ symbol: c.symbol, side: c.side, score: c.score, priceChangePct: c.priceChangePct }, c.indicators, CFG);
-
         if (!llm.approved) {
-          console.log(`    ${c.symbol} REJECTED by LLM (${llm.confidence}): ${llm.rationale?.slice(0, 60)}`);
-          continue;
+          console.log(`    ${c.symbol} LLM ADVISORY SKIP (conf: ${llm.confidence}): ${llm.rationale?.slice(0, 80)}`);
+        } else {
+          console.log(`    ${c.symbol} LLM OK (conf: ${llm.confidence}): ${llm.rationale?.slice(0, 60)}`);
         }
 
         // Calculate SL/TP
@@ -256,8 +307,6 @@ async function runScan() {
           quantity,
           sl: sltp.sl,
           tp1: sltp.tp1,
-          tp2: sltp.tp2,
-          tp3: sltp.tp3,
           atr,
         });
 
@@ -274,8 +323,6 @@ async function runScan() {
           margin: posSize.sizeUsd.toFixed(2),
           sl: sltp.sl,
           tp1: sltp.tp1,
-          tp2: sltp.tp2,
-          tp3: sltp.tp3,
           score: c.score,
           llmConfidence: llm.confidence,
           btcRegime,

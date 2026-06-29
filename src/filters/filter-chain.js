@@ -53,7 +53,7 @@ const criticalFilters = [
     name: 'volume_ratio',
     check: (_candidate, indicators, _config) => {
       const ratio = indicators.volumeRatio ?? 0;
-      const minRatio = 0.5; // At least 50% of average volume
+      const minRatio = 0.8; // At least 80% of average volume
       if (ratio < minRatio) {
         return { pass: false, reason: `volume ${ratio.toFixed(2)}x < ${minRatio}x, too low` };
       }
@@ -95,11 +95,23 @@ const criticalFilters = [
     name: 'RSI_guard',
     check: (candidate, indicators, _config) => {
       const rsi = indicators.RSI ?? 50;
-      if (candidate.side === 'long' && rsi > 70) {
-        return { pass: false, reason: `RSI ${rsi.toFixed(1)} > 70, overbought` };
+      const RSI_LONG_MIN = 35;
+      const RSI_SHORT_MAX = 65;
+      if (candidate.side === 'long') {
+        if (rsi > 70) {
+          return { pass: false, reason: `RSI ${rsi.toFixed(1)} > 70, overbought` };
+        }
+        if (rsi < RSI_LONG_MIN) {
+          return { pass: false, reason: `RSI ${rsi.toFixed(1)} < ${RSI_LONG_MIN}, no long momentum` };
+        }
       }
-      if (candidate.side === 'short' && rsi < 30) {
-        return { pass: false, reason: `RSI ${rsi.toFixed(1)} < 30, oversold` };
+      if (candidate.side === 'short') {
+        if (rsi < 30) {
+          return { pass: false, reason: `RSI ${rsi.toFixed(1)} < 30, oversold` };
+        }
+        if (rsi > RSI_SHORT_MAX) {
+          return { pass: false, reason: `RSI ${rsi.toFixed(1)} > ${RSI_SHORT_MAX}, no short momentum` };
+        }
       }
       return { pass: true, reason: null };
     }
@@ -119,11 +131,12 @@ const criticalFilters = [
     name: '4H_alignment',
     check: (candidate, indicators, _config) => {
       const trend4h = indicators.trend_4h ?? 'neutral';
-      if (candidate.side === 'long' && trend4h === 'bearish') {
-        return { pass: false, reason: `4H bearish, not aligned for long` };
+      // Neutral 4H now fails — require the 4H trend to actively agree
+      if (candidate.side === 'long' && trend4h !== 'bullish') {
+        return { pass: false, reason: `4H ${trend4h} not bullish, long needs 4H bullish` };
       }
-      if (candidate.side === 'short' && trend4h === 'bullish') {
-        return { pass: false, reason: `4H bullish, not aligned for short` };
+      if (candidate.side === 'short' && trend4h !== 'bearish') {
+        return { pass: false, reason: `4H ${trend4h} not bearish, short needs 4H bearish` };
       }
       return { pass: true, reason: null };
     }

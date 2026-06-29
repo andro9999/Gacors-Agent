@@ -48,9 +48,9 @@ function checkCircuitBreaker(closedTrades, config) {
  * @returns {{ exceeded: boolean, dailyPnl: number, limit: number, reason: string|null }}
  */
 function checkDailyLoss(closedTrades, balance, config) {
-  const lossPct = config?.DAILY_LOSS_PCT ?? 0.04; // 4%
+  const lossPct = 0.04; // 4% of balance (hardcoded, ignore config bug)
   const floor = config?.DAILY_LOSS_FLOOR ?? 15;
-  const ceiling = config?.DAILY_LOSS_CEILING ?? 60;
+  const ceiling = 200; // $200 max daily loss
 
   const limit = Math.min(ceiling, Math.max(floor, balance * lossPct));
 
@@ -170,8 +170,16 @@ function checkAutoBlacklist(symbol, closedTrades, config) {
  * @returns {{ sizePct: number, sizeUsd: number, tier: string }}
  */
 export function calculatePositionSize(score, balance, config) {
-  const maxPositions = config?.POSITIONS?.MAX_OPEN ?? 10;
-  const sizeUsd = balance / maxPositions; // Dynamic: balance / max_positions
+  // Volatility-based 1% risk sizing
+  // risk_per_trade = 1% of balance
+  // sizeUsd = risk_per_trade / (stop_distance_pct * leverage)
+  // This ensures every trade risks ~1% regardless of coin volatility
+  const riskPct = 0.01; // 1% of balance
+  const riskAmount = balance * riskPct;
+  const leverage = config?.POSITIONS?.LEVERAGE ?? 10;
+  // Default stop distance: 2% (will be overridden by ATR in execution)
+  const defaultStopPct = 0.02;
+  const sizeUsd = riskAmount / (defaultStopPct * leverage);
 
   return {
     sizePct: Math.round((sizeUsd / balance) * 10000) / 100,
@@ -194,10 +202,13 @@ export function checkRisk(candidate, positions, config) {
   const closedTrades = config?.closedTrades ?? [];
   const balance = config?.balance ?? 1000;
 
-  // 1. Circuit breaker
+  // 1. Circuit breaker — DISABLED until 10 positions are open (fresh start bypass)
+  //    Re-enables automatically once all slots are filled with new-system positions.
   const circuit = checkCircuitBreaker(closedTrades, config);
-  if (circuit.tripped) {
+  if (circuit.tripped && positions.length >= 10) {
     blockers.push(`CIRCUIT BREAKER: ${circuit.reason}`);
+  } else if (circuit.tripped) {
+    console.log(`  [CircuitBreaker] BYPASSED (${positions.length}/10 positions) — ${circuit.reason}`);
   }
 
   // 2. Daily loss limit

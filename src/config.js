@@ -35,10 +35,10 @@ export const CONFIG = {
   // ─── LLM GATE ────────────────────────────────────────────────────────
   LLM: {
     ENDPOINT: 'http://localhost:20128/v1',
-    MODEL: 'deepseek-v3.2',
+    MODEL: 'Generalcompute/deepseek-v3.2',
     CONFIDENCE_THRESHOLD: 0.3,
     CONFIDENCE_LONG: 0.35,
-    BYPASS_SCORE: 80,
+    BYPASS_SCORE: 60,
     MAX_TOKENS: 512,
     TEMPERATURE: 0.1,
     TIMEOUT_MS: 15000
