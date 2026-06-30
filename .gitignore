@@ -10,3 +10,4 @@ update_trade_log.sh
 .bot_token
 .credentials.b64
 *.bak2
+*.bak3

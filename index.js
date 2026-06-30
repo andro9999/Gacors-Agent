@@ -2,7 +2,7 @@
 
 import 'dotenv/config';
 import { CONFIG } from './src/config.js';
-import { fetchPairs, fetchKlines, fetchTicker, fetchFundingRate, calculateIndicators, getBTCRegime } from './src/api/bitget.js';
+import { fetchPairs, fetchKlines, fetchTicker, fetchFundingRate, calculateIndicators, getBTCRegime } from './src/api/binance.js';
 import { runFilterChain } from './src/filters/filter-chain.js';
 import { calculateScore } from './src/scoring/scoring-engine.js';
 import { checkRisk, calculatePositionSize } from './src/risk/risk-manager.js';
@@ -139,7 +139,7 @@ async function runScan() {
     let scoreFailed = 0;
     let regimeVetoed = 0;
 
-    for (const symbol of pairs.slice(0, 100)) {
+    for (const symbol of pairs.slice(0, 500)) {
       try {
         if (openSymbols.has(symbol)) continue;
         scanned++;

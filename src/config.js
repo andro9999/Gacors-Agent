@@ -38,7 +38,7 @@ export const CONFIG = {
     MODEL: 'Generalcompute/deepseek-v3.2',
     CONFIDENCE_THRESHOLD: 0.3,
     CONFIDENCE_LONG: 0.35,
-    BYPASS_SCORE: 60,
+    BYPASS_SCORE: 65,
     MAX_TOKENS: 512,
     TEMPERATURE: 0.1,
     TIMEOUT_MS: 15000
@@ -73,9 +73,9 @@ export const CONFIG = {
 
   // ─── SCORING ─────────────────────────────────────────────────────────
   SCORING: {
-    MIN_SCORE_NORMAL: 50,
-    MIN_SCORE_LONG: 55,
-    MIN_SCORE_SHORT_BEAR: 45,
+    MIN_SCORE_NORMAL: 55,
+    MIN_SCORE_LONG: 60,
+    MIN_SCORE_SHORT_BEAR: 55,
     BONUS_GATE: 5,
     WEIGHTS: {
       RSI: 1,

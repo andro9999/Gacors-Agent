@@ -15,7 +15,7 @@ import {
   _getDB,
   getBalance,
 } from './paper-trader.js';
-import { fetchTicker } from '../api/bitget.js';
+import { fetchTicker } from '../api/binance.js';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
